@@ -1,0 +1,5 @@
+opencv-python-headless<4.3
+Pillow
+gradio
+torch
+easyocr
