@@ -11,4 +11,4 @@ license: mit
 duplicated_from: awacke1/Image-to-Multilingual-OCR
 ---
 
-Check out the configuration reference at https://huggingface.co/docs/hub/spaces#reference
+Check out the hugggingface api [here](https://huggingface.co/spaces/stupidog04/Video-to-Multilingual-OCR?logs=build)
