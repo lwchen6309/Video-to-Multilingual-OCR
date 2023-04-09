@@ -142,7 +142,7 @@ def inference(video, lang, time_step, full_scan=False):
 
 
 title = '🖼️Video to Multilingual OCR👁️Gradio'
-description = 'Multilingual OCR which works conveniently on all devices in multiple languages. Adjust time-step for inference and the scan mode according to your requirement. For `Full Scan`, model scan the whole image if flag is ture, while scan only the box detected at the first video frame; this save computation cost.'
+description = 'Multilingual OCR which works conveniently on all devices in multiple languages. Adjust time-step for inference and the scan mode according to your requirement. For `Full Scan`, model scan the whole image if flag is ture, while scan only the box detected at the first video frame; this save computation cost; noting that the box is fixed in this case.'
 article = "<p style='text-align: center'></p>"
 
 examples = [
