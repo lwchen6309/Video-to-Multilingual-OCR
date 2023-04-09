@@ -40,7 +40,7 @@ def box_position(box):
     return (box[0][0][0] + box[0][2][0]) / 2, (box[0][0][1] + box[0][2][1]) / 2
 
 
-def inference(video, lang, time_step):
+def inference(video, lang, time_step, full_scan=False):
     output = 'results.mp4'
     reader = easyocr.Reader(lang)
     bounds = []   
@@ -50,7 +50,7 @@ def inference(video, lang, time_step):
     frame_rate = vidcap.get(cv2.CAP_PROP_FPS)
     output_frames = []
     temporal_profiles = []
-    compress_mp4 = False
+    compress_mp4 = True
 
     # Get the positions of the largest boxes in the first frame
     bounds = reader.readtext(frame)
@@ -63,14 +63,17 @@ def inference(video, lang, time_step):
     # Match bboxes to position and store the text read by OCR
     while success:
         if count % (int(frame_rate * time_step)) == 0:
-            if count % (int(frame_rate * time_step) * 30) == 0:
-                # update the largest boxes every 30 frames
+            if full_scan:
                 bounds = reader.readtext(frame)
-                largest_boxes = sorted(bounds, key=lambda x: box_size(x), reverse=True)
-                positions = [box_position(b) for b in largest_boxes]
-            for i, box in enumerate(largest_boxes):
-                bbox_pos = box_position(box)
-                if np.linalg.norm(np.array(bbox_pos) - np.array(positions[i])) < 50:
+                for box in bounds:
+                    bbox_pos = box_position(box)
+                    for i, position in enumerate(positions):
+                        distance = np.linalg.norm(np.array(bbox_pos) - np.array(position))
+                        if distance < 50:
+                            temporal_profiles[i].append((count / frame_rate, box[1]))
+                            break
+            else:
+                for i, box in enumerate(largest_boxes):
                     x1, y1 = box[0][0]
                     x2, y2 = box[0][2]
                     box_width = x2 - x1
@@ -84,9 +87,11 @@ def inference(video, lang, time_step):
                     text = reader.readtext(cropped_frame)
                     if text:
                         temporal_profiles[i].append((count / frame_rate, text[0][1]))
+            
             im = PIL.Image.fromarray(frame)
             im_with_boxes = draw_boxes(im, bounds)
             output_frames.append(np.array(im_with_boxes))
+
         success, frame = vidcap.read()
         count += 1
     
@@ -137,11 +142,11 @@ def inference(video, lang, time_step):
 
 
 title = '🖼️Video to Multilingual OCR👁️Gradio'
-description = 'Multilingual OCR which works conveniently on all devices in multiple languages.'
+description = 'Multilingual OCR which works conveniently on all devices in multiple languages. Adjust time-step for inference and the scan mode according to your requirement. For `Full Scan`, model scan the whole image if flag is ture, while scan only the box detected at the first video frame; this save computation cost.'
 article = "<p style='text-align: center'></p>"
 
 examples = [
-['test.mp4',['en']]
+['test.mp4',['en'],10,False]
 ]
 
 css = ".output_image, .input_image {height: 40rem !important; width: 100% !important;}"
@@ -162,7 +167,8 @@ gr.Interface(
     [
         gr.inputs.Video(label='Input Video'),
         gr.inputs.CheckboxGroup(choices, type="value", default=['en'], label='Language'),
-        gr.inputs.Number(label='Time Step (in seconds)', default=1.0)
+        gr.inputs.Number(label='Time Step (in seconds)', default=1.0),
+        gr.inputs.Dropdown(['True', 'False'], label='Full Scan', default='False')
     ],
     [
         gr.outputs.Video(label='Output Video'),
