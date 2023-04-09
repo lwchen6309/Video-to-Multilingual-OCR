@@ -1,12 +1,13 @@
 import numpy as np
 import PIL
-from PIL import Image, ImageDraw
+from PIL import Image, ImageDraw, ImageFont
 import gradio as gr
 import torch
 import easyocr
 import os
 from pathlib import Path
 import cv2
+import pandas as pd
 
 
 #torch.hub.download_url_to_file('https://github.com/AaronCWacker/Yggdrasil/blob/main/images/BeautyIsTruthTruthisBeauty.JPG', 'BeautyIsTruthTruthisBeauty.JPG')
@@ -26,10 +27,21 @@ def draw_boxes(image, bounds, color='yellow', width=2):
         draw.line([*p0, *p1, *p2, *p3, *p0], fill=color, width=width)
     return image
 
+def box_size(box):
+    points = box[0]
+    if len(points) == 4:
+        x1, y1 = points[0]
+        x2, y2 = points[2]
+        return abs(x1 - x2) * abs(y1 - y2)
+    else:
+        return 0
+
+def box_position(box):
+    return (box[0][0][0] + box[0][2][0]) / 2, (box[0][0][1] + box[0][2][1]) / 2
+
+
 def inference(video, lang, time_step):
-    # output = f"{Path(video).stem}_detected{Path(src).suffix}"
     output = 'results.mp4'
-    
     reader = easyocr.Reader(lang)
     bounds = []   
     vidcap = cv2.VideoCapture(video)
@@ -37,12 +49,35 @@ def inference(video, lang, time_step):
     count = 0
     frame_rate = vidcap.get(cv2.CAP_PROP_FPS)
     output_frames = []
+    temporal_profiles = []
+    compress_mp4 = False
+
+    # Get the positions of the largest boxes in the first frame
+    while success and not bounds:
+        if count == 0:
+            bounds = reader.readtext(frame)
+            im = PIL.Image.fromarray(frame)
+            im_with_boxes = draw_boxes(im, bounds)
+            largest_boxes = sorted(bounds, key=lambda x: box_size(x), reverse=True)
+            positions = [box_position(b) for b in largest_boxes]
+            temporal_profiles = [[] for _ in range(len(largest_boxes))]
+        success, frame = vidcap.read()
+        count += 1
+    
+    # Match bboxes to position and store the text read by OCR
     while success:
         if count % (int(frame_rate * time_step)) == 0:
             bounds = reader.readtext(frame)
+            for box in bounds:
+                bbox_pos = box_position(box)
+                for i, position in enumerate(positions):
+                    distance = np.linalg.norm(np.array(bbox_pos) - np.array(position))
+                    if distance < 50:
+                        temporal_profiles[i].append((count / frame_rate, box[1]))
+                        break
             im = PIL.Image.fromarray(frame)
-            draw_boxes(im, bounds)
-            output_frames.append(np.array(im))
+            im_with_boxes = draw_boxes(im, bounds)
+            output_frames.append(np.array(im_with_boxes))
         success, frame = vidcap.read()
         count += 1
     
@@ -54,22 +89,42 @@ def inference(video, lang, time_step):
     frames_total = int(vidcap.get(cv2.CAP_PROP_FRAME_COUNT))
 
     # Define the codec and create VideoWriter object.
-    temp = f"{Path(output).stem}_temp{Path(output).suffix}"
-    output_video = cv2.VideoWriter(
-        temp, cv2.VideoWriter_fourcc(*"mp4v"), fps, (width, height)
-    )
-    # output_video = cv2.VideoWriter(output, cv2.VideoWriter_fourcc(*"mp4v"), fps, (width, height))
+    if compress_mp4:
+        temp = f"{Path(output).stem}_temp{Path(output).suffix}"
+        output_video = cv2.VideoWriter(
+            temp, cv2.VideoWriter_fourcc(*"mp4v"), fps, (width, height)
+        )
+    else:
+        output_video = cv2.VideoWriter(output, cv2.VideoWriter_fourcc(*"mp4v"), fps, (width, height))
     for frame in output_frames:
         output_video.write(frame)
+
+    # Draw boxes with box indices in the first frame of the output video
+    im = Image.fromarray(output_frames[0])
+    draw = ImageDraw.Draw(im)
+    font_size = 30
+    font_path = "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf"
+    for i, box in enumerate(largest_boxes):
+        draw.text((box_position(box)), f"Box {i+1}", fill='red', font=ImageFont.truetype(font_path, font_size))
+    
     output_video.release()
     vidcap.release()
 
-    # Compressing the video for smaller size and web compatibility.
-    os.system(
-        f"ffmpeg -y -i {temp} -c:v libx264 -b:v 5000k -minrate 1000k -maxrate 8000k -pass 1 -c:a aac -f mp4 /dev/null && ffmpeg -y -i {temp} -c:v libx264 -b:v 5000k -minrate 1000k -maxrate 8000k -pass 2 -c:a aac -movflags faststart {output}"
-    )
-    os.system(f"rm -rf {temp} ffmpeg2pass-0.log ffmpeg2pass-0.log.mbtree")
-    return output
+    if compress_mp4:
+        # Compressing the video for smaller size and web compatibility.
+        os.system(
+            f"ffmpeg -y -i {temp} -c:v libx264 -b:v 5000k -minrate 1000k -maxrate 8000k -pass 1 -c:a aac -f mp4 /dev/null && ffmpeg -y -i {temp} -c:v libx264 -b:v 5000k -minrate 1000k -maxrate 8000k -pass 2 -c:a aac -movflags faststart {output}"
+        )
+        os.system(f"rm -rf {temp} ffmpeg2pass-0.log ffmpeg2pass-0.log.mbtree")
+    
+    # Format temporal profiles as a DataFrame
+    df_list = []
+    for i, profile in enumerate(temporal_profiles):
+        for t, text in profile:
+            df_list.append({"Box": f"Box {i+1}", "Time (s)": t, "Text": text})
+        df_list.append({"Box": f"", "Time (s)": "", "Text": ""})
+    df = pd.concat([pd.DataFrame(df_list)])
+    return output, im, df
 
 
 title = '🖼️Video to Multilingual OCR👁️Gradio'
@@ -77,8 +132,7 @@ description = 'Multilingual OCR which works conveniently on all devices in multi
 article = "<p style='text-align: center'></p>"
 
 examples = [
-#['PleaseRepeatLouder.jpg',['ja']],['ProhibitedInWhiteHouse.JPG',['en']],['BeautyIsTruthTruthisBeauty.JPG',['en']],
-['20-Books.jpg',['en']],['COVID.png',['en']],['chinese.jpg',['ch_sim', 'en']],['japanese.jpg',['ja', 'en']],['Hindi.jpeg',['hi', 'en']]
+['test.mp4',['en']]
 ]
 
 css = ".output_image, .input_image {height: 40rem !important; width: 100% !important;}"
@@ -97,19 +151,19 @@ choices = [
 gr.Interface(
     inference,
     [
-        # gr.inputs.Image(type='file', label='Input Image'),
         gr.inputs.Video(label='Input Video'),
         gr.inputs.CheckboxGroup(choices, type="value", default=['en'], label='Language'),
         gr.inputs.Number(label='Time Step (in seconds)', default=1.0)
     ],
     [
         gr.outputs.Video(label='Output Video'),
-        # gr.outputs.Dataframe(headers=['Text', 'Confidence'])
+        gr.outputs.Image(label='Output Preview', type='numpy'),
+        gr.outputs.Dataframe(headers=['Box', 'Time (s)', 'Text'], type='pandas')
     ],
     title=title,
     description=description,
     article=article,
-    # examples=examples,
+    examples=examples,
     css=css,
     enable_queue=True
 ).launch(debug=True)
