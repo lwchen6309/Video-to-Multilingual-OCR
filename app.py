@@ -53,28 +53,37 @@ def inference(video, lang, time_step):
     compress_mp4 = False
 
     # Get the positions of the largest boxes in the first frame
-    while success and not bounds:
-        if count == 0:
-            bounds = reader.readtext(frame)
-            im = PIL.Image.fromarray(frame)
-            im_with_boxes = draw_boxes(im, bounds)
-            largest_boxes = sorted(bounds, key=lambda x: box_size(x), reverse=True)
-            positions = [box_position(b) for b in largest_boxes]
-            temporal_profiles = [[] for _ in range(len(largest_boxes))]
-        success, frame = vidcap.read()
-        count += 1
+    bounds = reader.readtext(frame)
+    im = PIL.Image.fromarray(frame)
+    im_with_boxes = draw_boxes(im, bounds)
+    largest_boxes = sorted(bounds, key=lambda x: box_size(x), reverse=True)
+    positions = [box_position(b) for b in largest_boxes]
+    temporal_profiles = [[] for _ in range(len(largest_boxes))]
     
     # Match bboxes to position and store the text read by OCR
     while success:
         if count % (int(frame_rate * time_step)) == 0:
-            bounds = reader.readtext(frame)
-            for box in bounds:
+            if count % (int(frame_rate * time_step) * 30) == 0:
+                # update the largest boxes every 30 frames
+                bounds = reader.readtext(frame)
+                largest_boxes = sorted(bounds, key=lambda x: box_size(x), reverse=True)
+                positions = [box_position(b) for b in largest_boxes]
+            for i, box in enumerate(largest_boxes):
                 bbox_pos = box_position(box)
-                for i, position in enumerate(positions):
-                    distance = np.linalg.norm(np.array(bbox_pos) - np.array(position))
-                    if distance < 50:
-                        temporal_profiles[i].append((count / frame_rate, box[1]))
-                        break
+                if np.linalg.norm(np.array(bbox_pos) - np.array(positions[i])) < 50:
+                    x1, y1 = box[0][0]
+                    x2, y2 = box[0][2]
+                    box_width = x2 - x1
+                    box_height = y2 - y1
+                    ratio = 0.2
+                    x1 = max(0, int(x1 - ratio * box_width))
+                    x2 = min(frame.shape[1], int(x2 + ratio * box_width))
+                    y1 = max(0, int(y1 - ratio * box_height))
+                    y2 = min(frame.shape[0], int(y2 + ratio * box_height))
+                    cropped_frame = frame[y1:y2, x1:x2]
+                    text = reader.readtext(cropped_frame)
+                    if text:
+                        temporal_profiles[i].append((count / frame_rate, text[0][1]))
             im = PIL.Image.fromarray(frame)
             im_with_boxes = draw_boxes(im, bounds)
             output_frames.append(np.array(im_with_boxes))
