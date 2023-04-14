@@ -39,8 +39,37 @@ def box_size(box):
 def box_position(box):
     return (box[0][0][0] + box[0][2][0]) / 2, (box[0][0][1] + box[0][2][1]) / 2
 
+def filter_temporal_profiles(temporal_profiles):
+    filtered_profiles = []
+    for profile in temporal_profiles:
+        dot_indexes = []
+        for t, text in profile:
+            # Replace "," with "."
+            filtered_text = text.replace(",", ".")
+            # Track the index of "."
+            dot_index = filtered_text.find(".")
+            dot_indexes.append(dot_index)
 
-def inference(video, lang, time_step, full_scan=False):
+        for i in range(len(profile)):
+            # If "." not found in current index and "." indexes are consistent for the previous and next index,
+            # insert the "." at the same position
+            if dot_indexes[i] == -1 and i > 0 and i < len(profile)-1:
+                if dot_indexes[i-1] == dot_indexes[i+1] and dot_indexes[i-1] != -1:
+                    _t, _txt = profile[i]
+                    profile[i] = (_t, _txt[:dot_indexes[i-1]] + "." + _txt[dot_indexes[i-1]:])
+
+        filtered_profile = []
+        for t, text in profile:
+            try:
+                filtered_value = float(text)
+            except ValueError:
+                continue
+            filtered_profile.append((t, filtered_value))
+        filtered_profiles.append(filtered_profile)
+    return filtered_profiles
+
+
+def inference(video, lang, time_step, full_scan, number_filter):
     output = 'results.mp4'
     reader = easyocr.Reader(lang)
     bounds = []   
@@ -50,16 +79,21 @@ def inference(video, lang, time_step, full_scan=False):
     frame_rate = vidcap.get(cv2.CAP_PROP_FPS)
     output_frames = []
     temporal_profiles = []
-    compress_mp4 = True
+    compress_mp4 = False
 
     # Get the positions of the largest boxes in the first frame
     bounds = reader.readtext(frame)
+    for i in reversed(range(len(bounds))):
+        box = bounds[i]
+        # Remove box if it doesn't contain a number
+        if not any(char.isdigit() for char in box[1]):
+            bounds.pop(i)
     im = PIL.Image.fromarray(frame)
     im_with_boxes = draw_boxes(im, bounds)
     largest_boxes = sorted(bounds, key=lambda x: box_size(x), reverse=True)
     positions = [box_position(b) for b in largest_boxes]
     temporal_profiles = [[] for _ in range(len(largest_boxes))]
-    
+
     # Match bboxes to position and store the text read by OCR
     while success:
         if count % (int(frame_rate * time_step)) == 0:
@@ -94,7 +128,11 @@ def inference(video, lang, time_step, full_scan=False):
 
         success, frame = vidcap.read()
         count += 1
-    
+
+    if number_filter:
+        # Filter the temporal profiles by removing non-matching characters and converting to floats
+        temporal_profiles = filter_temporal_profiles(temporal_profiles)
+
     # Default resolutions of the frame are obtained. The default resolutions are system dependent.
     # We convert the resolutions from float to integer.
     width = int(vidcap.get(cv2.CAP_PROP_FRAME_WIDTH))
@@ -146,7 +184,7 @@ description = 'Multilingual OCR which works conveniently on all devices in multi
 article = "<p style='text-align: center'></p>"
 
 examples = [
-['test.mp4',['en'],10,False]
+['test.mp4',['en'],10,]
 ]
 
 css = ".output_image, .input_image {height: 40rem !important; width: 100% !important;}"
@@ -168,7 +206,8 @@ gr.Interface(
         gr.inputs.Video(label='Input Video'),
         gr.inputs.CheckboxGroup(choices, type="value", default=['en'], label='Language'),
         gr.inputs.Number(label='Time Step (in seconds)', default=1.0),
-        gr.inputs.Dropdown(['True', 'False'], label='Full Scan', default='False')
+        gr.inputs.Checkbox(label='Full Screen Scan'),
+        gr.inputs.Checkbox(label='Number Filter')
     ],
     [
         gr.outputs.Video(label='Output Video'),
