@@ -8,6 +8,7 @@ import os
 from pathlib import Path
 import cv2
 import pandas as pd
+from transformers import TrOCRProcessor, VisionEncoderDecoderModel
 
 
 #torch.hub.download_url_to_file('https://github.com/AaronCWacker/Yggdrasil/blob/main/images/BeautyIsTruthTruthisBeauty.JPG', 'BeautyIsTruthTruthisBeauty.JPG')
@@ -19,6 +20,7 @@ torch.hub.download_url_to_file('https://github.com/JaidedAI/EasyOCR/raw/master/e
 torch.hub.download_url_to_file('https://github.com/JaidedAI/EasyOCR/raw/master/examples/chinese.jpg', 'chinese.jpg')
 torch.hub.download_url_to_file('https://github.com/JaidedAI/EasyOCR/raw/master/examples/japanese.jpg', 'japanese.jpg')
 torch.hub.download_url_to_file('https://i.imgur.com/mwQFd7G.jpeg', 'Hindi.jpeg')
+
 
 def draw_boxes(image, bounds, color='yellow', width=2):
     draw = ImageDraw.Draw(image)
@@ -39,29 +41,17 @@ def box_size(box):
 def box_position(box):
     return (box[0][0][0] + box[0][2][0]) / 2, (box[0][0][1] + box[0][2][1]) / 2
 
-def filter_temporal_profiles(temporal_profiles):
+def filter_temporal_profiles(temporal_profiles, period_index):
     filtered_profiles = []
     for profile in temporal_profiles:
-        dot_indexes = []
-        for t, text in profile:
-            # Replace "," with "."
-            filtered_text = text.replace(",", ".")
-            # Track the index of "."
-            dot_index = filtered_text.find(".")
-            dot_indexes.append(dot_index)
-
-        for i in range(len(profile)):
-            # If "." not found in current index and "." indexes are consistent for the previous and next index,
-            # insert the "." at the same position
-            if dot_indexes[i] == -1 and i > 0 and i < len(profile)-1:
-                if dot_indexes[i-1] == dot_indexes[i+1] and dot_indexes[i-1] != -1:
-                    _t, _txt = profile[i]
-                    profile[i] = (_t, _txt[:dot_indexes[i-1]] + "." + _txt[dot_indexes[i-1]:])
-
         filtered_profile = []
         for t, text in profile:
+            # Remove all non-digit characters from text
+            filtered_text = ''.join(filter(str.isdigit, text))
+            # Insert period at the specified index
+            filtered_text = filtered_text[:period_index] + "." + filtered_text[period_index:]
             try:
-                filtered_value = float(text)
+                filtered_value = float(filtered_text)
             except ValueError:
                 continue
             filtered_profile.append((t, filtered_value))
@@ -69,7 +59,11 @@ def filter_temporal_profiles(temporal_profiles):
     return filtered_profiles
 
 
-def inference(video, lang, time_step, full_scan, number_filter):
+device = 'cuda' if torch.cuda.is_available() else 'cpu'
+processor = TrOCRProcessor.from_pretrained('microsoft/trocr-large-printed')
+model = VisionEncoderDecoderModel.from_pretrained('microsoft/trocr-large-printed').to(device)
+
+def inference(video, lang, time_step, full_scan, number_filter, use_trocr, period_index):
     output = 'results.mp4'
     reader = easyocr.Reader(lang)
     bounds = []   
@@ -118,9 +112,15 @@ def inference(video, lang, time_step, full_scan, number_filter):
                     y1 = max(0, int(y1 - ratio * box_height))
                     y2 = min(frame.shape[0], int(y2 + ratio * box_height))
                     cropped_frame = frame[y1:y2, x1:x2]
-                    text = reader.readtext(cropped_frame)
-                    if text:
-                        temporal_profiles[i].append((count / frame_rate, text[0][1]))
+                    if use_trocr:
+                        pixel_values = processor(images=cropped_frame, return_tensors="pt").pixel_values
+                        generated_ids = model.generate(pixel_values.to(device))
+                        generated_text = processor.batch_decode(generated_ids, skip_special_tokens=True)[0]
+                        temporal_profiles[i].append((count / frame_rate, generated_text))
+                    else:
+                        text = reader.readtext(cropped_frame)
+                        if text:
+                            temporal_profiles[i].append((count / frame_rate, text[0][1]))
             
             im = PIL.Image.fromarray(frame)
             im_with_boxes = draw_boxes(im, bounds)
@@ -131,7 +131,7 @@ def inference(video, lang, time_step, full_scan, number_filter):
 
     if number_filter:
         # Filter the temporal profiles by removing non-matching characters and converting to floats
-        temporal_profiles = filter_temporal_profiles(temporal_profiles)
+        temporal_profiles = filter_temporal_profiles(temporal_profiles, int(period_index))
 
     # Default resolutions of the frame are obtained. The default resolutions are system dependent.
     # We convert the resolutions from float to integer.
@@ -180,7 +180,7 @@ def inference(video, lang, time_step, full_scan, number_filter):
 
 
 title = '🖼️Video to Multilingual OCR👁️Gradio'
-description = 'Multilingual OCR which works conveniently on all devices in multiple languages. Adjust time-step for inference and the scan mode according to your requirement. For `Full Scan`, model scan the whole image if flag is ture, while scan only the box detected at the first video frame; this save computation cost; noting that the box is fixed in this case.'
+description = 'Multilingual OCR which works conveniently on all devices in multiple languages. Adjust time-step for inference and the scan mode according to your requirement. For `Full Screen Scan`, model scan the whole image if flag is ture, while scan only the box detected at the first video frame; this accelerate the inference while detecting the fixed box.'
 article = "<p style='text-align: center'></p>"
 
 examples = [
@@ -207,12 +207,14 @@ gr.Interface(
         gr.inputs.CheckboxGroup(choices, type="value", default=['en'], label='Language'),
         gr.inputs.Number(label='Time Step (in seconds)', default=1.0),
         gr.inputs.Checkbox(label='Full Screen Scan'),
-        gr.inputs.Checkbox(label='Number Filter')
+        gr.inputs.Checkbox(label='Use TrOCR large (this is only available when Full Screen Scan is disable)'),
+        gr.inputs.Checkbox(label='Number Filter (remove non-digit char and insert period)'),
+        gr.inputs.Textbox(label="period position",default=1)
     ],
     [
         gr.outputs.Video(label='Output Video'),
         gr.outputs.Image(label='Output Preview', type='numpy'),
-        gr.outputs.Dataframe(headers=['Box', 'Time (s)', 'Text'], type='pandas')
+        gr.outputs.Dataframe(headers=['Box', 'Time (s)', 'Text'], type='pandas'),
     ],
     title=title,
     description=description,
