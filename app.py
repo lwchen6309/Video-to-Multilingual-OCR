@@ -9,7 +9,7 @@ from pathlib import Path
 import cv2
 import pandas as pd
 from transformers import TrOCRProcessor, VisionEncoderDecoderModel
-
+import matplotlib.pyplot as plt
 
 #torch.hub.download_url_to_file('https://github.com/AaronCWacker/Yggdrasil/blob/main/images/BeautyIsTruthTruthisBeauty.JPG', 'BeautyIsTruthTruthisBeauty.JPG')
 #torch.hub.download_url_to_file('https://github.com/AaronCWacker/Yggdrasil/blob/main/images/PleaseRepeatLouder.jpg', 'PleaseRepeatLouder.jpg')
@@ -21,6 +21,17 @@ torch.hub.download_url_to_file('https://github.com/JaidedAI/EasyOCR/raw/master/e
 torch.hub.download_url_to_file('https://github.com/JaidedAI/EasyOCR/raw/master/examples/japanese.jpg', 'japanese.jpg')
 torch.hub.download_url_to_file('https://i.imgur.com/mwQFd7G.jpeg', 'Hindi.jpeg')
 
+
+def plot_temporal_profile(temporal_profile):
+    fig = plt.figure()
+    for i, profile in enumerate(temporal_profile):
+        x, y = zip(*profile)
+        plt.plot(x, y, label=f"Box {i+1}")
+    plt.title("Temporal Profiles")
+    plt.xlabel("Time (s)")
+    plt.ylabel("Value")
+    plt.legend()
+    return fig
 
 def draw_boxes(image, bounds, color='yellow', width=2):
     draw = ImageDraw.Draw(image)
@@ -176,7 +187,10 @@ def inference(video, lang, time_step, full_scan, number_filter, use_trocr, perio
             df_list.append({"Box": f"Box {i+1}", "Time (s)": t, "Text": text})
         df_list.append({"Box": f"", "Time (s)": "", "Text": ""})
     df = pd.concat([pd.DataFrame(df_list)])
-    return output, im, df
+
+    # generate the plot of temporal profile
+    plot_fig = plot_temporal_profile(temporal_profiles)
+    return output, im, plot_fig, df
 
 
 title = '🖼️Video to Multilingual OCR👁️Gradio'
@@ -184,7 +198,7 @@ description = 'Multilingual OCR which works conveniently on all devices in multi
 article = "<p style='text-align: center'></p>"
 
 examples = [
-['test.mp4',['en'],10,]
+['test.mp4',['en'],10,False,True,True,1]
 ]
 
 css = ".output_image, .input_image {height: 40rem !important; width: 100% !important;}"
@@ -214,7 +228,8 @@ gr.Interface(
     [
         gr.outputs.Video(label='Output Video'),
         gr.outputs.Image(label='Output Preview', type='numpy'),
-        gr.outputs.Dataframe(headers=['Box', 'Time (s)', 'Text'], type='pandas'),
+        gr.Plot(label='Temporal Profile'),
+        gr.outputs.Dataframe(headers=['Box', 'Time (s)', 'Text'], type='pandas')
     ],
     title=title,
     description=description,
@@ -222,4 +237,4 @@ gr.Interface(
     examples=examples,
     css=css,
     enable_queue=True
-).launch(debug=True)
+).launch(debug=True, share=True)
