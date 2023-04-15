@@ -74,6 +74,19 @@ device = 'cuda' if torch.cuda.is_available() else 'cpu'
 processor = TrOCRProcessor.from_pretrained('microsoft/trocr-large-printed')
 model = VisionEncoderDecoderModel.from_pretrained('microsoft/trocr-large-printed').to(device)
 
+def process_box(box, frame, enlarge_ratio):
+    x1, y1 = box[0][0]
+    x2, y2 = box[0][2]
+    enlarge_ratio = enlarge_ratio/2
+    box_width = x2 - x1
+    box_height = y2 - y1
+    x1 = max(0, int(x1 - enlarge_ratio * box_width))
+    x2 = min(frame.shape[1], int(x2 + enlarge_ratio * box_width))
+    y1 = max(0, int(y1 - enlarge_ratio * box_height))
+    y2 = min(frame.shape[0], int(y2 + enlarge_ratio * box_height))
+    cropped_frame = frame[y1:y2, x1:x2]
+    return cropped_frame
+
 def inference(video, lang, time_step, full_scan, number_filter, use_trocr, period_index):
     output = 'results.mp4'
     reader = easyocr.Reader(lang)
@@ -84,7 +97,7 @@ def inference(video, lang, time_step, full_scan, number_filter, use_trocr, perio
     frame_rate = vidcap.get(cv2.CAP_PROP_FPS)
     output_frames = []
     temporal_profiles = []
-    compress_mp4 = False
+    compress_mp4 = True
 
     # Get the positions of the largest boxes in the first frame
     bounds = reader.readtext(frame)
@@ -102,27 +115,24 @@ def inference(video, lang, time_step, full_scan, number_filter, use_trocr, perio
     # Match bboxes to position and store the text read by OCR
     while success:
         if count % (int(frame_rate * time_step)) == 0:
-            if full_scan:
-                bounds = reader.readtext(frame)
-                for box in bounds:
+            bounds = reader.readtext(frame) if full_scan else largest_boxes
+            for i, box in enumerate(bounds):
+                if full_scan:
+                    # Match box to previous box
                     bbox_pos = box_position(box)
                     for i, position in enumerate(positions):
                         distance = np.linalg.norm(np.array(bbox_pos) - np.array(position))
                         if distance < 50:
-                            temporal_profiles[i].append((count / frame_rate, box[1]))
-                            break
-            else:
-                for i, box in enumerate(largest_boxes):
-                    x1, y1 = box[0][0]
-                    x2, y2 = box[0][2]
-                    box_width = x2 - x1
-                    box_height = y2 - y1
-                    ratio = 0.2
-                    x1 = max(0, int(x1 - ratio * box_width))
-                    x2 = min(frame.shape[1], int(x2 + ratio * box_width))
-                    y1 = max(0, int(y1 - ratio * box_height))
-                    y2 = min(frame.shape[0], int(y2 + ratio * box_height))
-                    cropped_frame = frame[y1:y2, x1:x2]
+                            if use_trocr:
+                                cropped_frame = process_box(box, frame, enlarge_ratio=0.2)
+                                pixel_values = processor(images=cropped_frame, return_tensors="pt").pixel_values
+                                generated_ids = model.generate(pixel_values.to(device))
+                                generated_text = processor.batch_decode(generated_ids, skip_special_tokens=True)[0]
+                                temporal_profiles[i].append((count / frame_rate, generated_text))
+                            else:
+                                temporal_profiles[i].append((count / frame_rate, box[1]))
+                else:
+                    cropped_frame = process_box(box, frame, enlarge_ratio=0.2)
                     if use_trocr:
                         pixel_values = processor(images=cropped_frame, return_tensors="pt").pixel_values
                         generated_ids = model.generate(pixel_values.to(device))
@@ -165,10 +175,10 @@ def inference(video, lang, time_step, full_scan, number_filter, use_trocr, perio
     # Draw boxes with box indices in the first frame of the output video
     im = Image.fromarray(output_frames[0])
     draw = ImageDraw.Draw(im)
-    font_size = 30
+    font_size = 50
     font_path = "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf"
     for i, box in enumerate(largest_boxes):
-        draw.text((box_position(box)), f"Box {i+1}", fill='red', font=ImageFont.truetype(font_path, font_size))
+        draw.text((box_position(box)), f"{i+1}", fill='red', font=ImageFont.truetype(font_path, font_size))
     
     output_video.release()
     vidcap.release()
@@ -221,7 +231,7 @@ gr.Interface(
         gr.inputs.CheckboxGroup(choices, type="value", default=['en'], label='Language'),
         gr.inputs.Number(label='Time Step (in seconds)', default=1.0),
         gr.inputs.Checkbox(label='Full Screen Scan'),
-        gr.inputs.Checkbox(label='Use TrOCR large (this is only available when Full Screen Scan is disable)'),
+        gr.inputs.Checkbox(label='Use TrOCR large'),
         gr.inputs.Checkbox(label='Number Filter (remove non-digit char and insert period)'),
         gr.inputs.Textbox(label="period position",default=1)
     ],
