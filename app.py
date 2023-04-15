@@ -84,7 +84,7 @@ def inference(video, lang, time_step, full_scan, number_filter, use_trocr, perio
     frame_rate = vidcap.get(cv2.CAP_PROP_FPS)
     output_frames = []
     temporal_profiles = []
-    compress_mp4 = False
+    compress_mp4 = True
 
     # Get the positions of the largest boxes in the first frame
     bounds = reader.readtext(frame)
@@ -213,28 +213,38 @@ choices = [
     "ru"
 ]
 
+block = gr.Blocks().queue()
 
-gr.Interface(
-    inference,
-    [
-        gr.inputs.Video(label='Input Video'),
-        gr.inputs.CheckboxGroup(choices, type="value", default=['en'], label='Language'),
-        gr.inputs.Number(label='Time Step (in seconds)', default=1.0),
-        gr.inputs.Checkbox(label='Full Screen Scan'),
-        gr.inputs.Checkbox(label='Use TrOCR large (this is only available when Full Screen Scan is disable)'),
-        gr.inputs.Checkbox(label='Number Filter (remove non-digit char and insert period)'),
-        gr.inputs.Textbox(label="period position",default=1)
-    ],
-    [
-        gr.outputs.Video(label='Output Video'),
-        gr.outputs.Image(label='Output Preview', type='numpy'),
-        gr.Plot(label='Temporal Profile'),
-        gr.outputs.Dataframe(headers=['Box', 'Time (s)', 'Text'], type='pandas')
-    ],
-    title=title,
-    description=description,
-    article=article,
-    examples=examples,
-    css=css,
-    enable_queue=True
-).launch(debug=True, share=True)
+with block:
+    with gr.Row():
+        gr.Markdown("## Number detector for Video")
+    with gr.Row():
+        with gr.Column():
+            with gr.Row():
+                input_video = gr.inputs.Video(label='Input Video')
+            with gr.Row():
+                languages = gr.inputs.CheckboxGroup(choices, type="value", default=['en'], label='Language')
+            with gr.Row():
+                full_screen_scan = gr.inputs.Checkbox(label='Full Screen Scan')
+                use_trocr_large = gr.inputs.Checkbox(label='Use TrOCR large (this is only available when Full Screen Scan is disable)')
+                number_filter = gr.inputs.Checkbox(label='Number Filter (remove non-digit char and insert period)')
+            with gr.Row():
+                time_step = gr.inputs.Number(label='Time Step (in seconds)', default=1.0)
+                period_position = gr.inputs.Textbox(label="period position", default=1)
+            with gr.Row():
+                other_button = gr.Button(value="Other Function", label="Other Function")
+                infer_button = gr.Button(value="Infer", label="Infer")
+        with gr.Column():
+            with gr.Row():
+                output_video = gr.outputs.Video(label='Output Video')
+            with gr.Row():
+                output_preview = gr.Image(label='Output Preview', type='numpy') # , interactive=True, tool='color-sketch'
+            with gr.Row():
+                temporal_profile = gr.Plot(label='Temporal Profile')
+            with gr.Row():
+                output_dataframe = gr.outputs.Dataframe(headers=['Box', 'Time (s)', 'Text'], type='pandas')
+   
+    infer_button.click(fn=inference, inputs=[input_video, languages, time_step, full_screen_scan, use_trocr_large, number_filter, period_position], outputs=[output_video, output_preview, temporal_profile, output_dataframe])
+    # other_button.click(fn=other_function)  # Add the required inputs and outputs for this function
+
+block.launch(server_name='0.0.0.0', share=False)
