@@ -1,5 +1,10 @@
 # Video number detector
 
+This app utilize easyocr and trocr-large for text tracking in video
+- [easyocr](https://github.com/JaidedAI/EasyOCR) for fast but whole screen detection
+- [trocr-large](https://huggingface.co/microsoft/trocr-large-printed) for accurate detection
+
+
 
 # Huggingface api
 See out the hugggingface api [here](https://huggingface.co/spaces/stupidog04/Video-to-Multilingual-OCR?logs=build)
@@ -12,7 +17,7 @@ git clone git@github.com:lwchen6309/Video-to-Multilingual-OCR.git
 ```
 Setup conda enviroment
 ```
-conda create -n video_ocr
+conda create -n video_ocr python=3.10
 conda activate video_ocr
 conda install pip
 ```
