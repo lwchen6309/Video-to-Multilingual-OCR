@@ -4,8 +4,7 @@ This app utilize these models for text tracking in video
 - [easyocr](https://github.com/JaidedAI/EasyOCR) for fast but whole screen detection
 - [trocr-large](https://huggingface.co/microsoft/trocr-large-printed) for accurate detection
 
-![screencapture-127-0-0-1-7860-2023-04-16-19_05_55](https://user-images.githubusercontent.com/42672685/232305303-023c461b-cd34-4e6d-a43a-90915c02a2bf.jpg)
-
+![screencapture-127-0-0-1-7860-2023-04-16-21_28_15](https://user-images.githubusercontent.com/42672685/232314712-2812477b-78cf-462d-8273-938faca92005.jpg)
 
 
 # Huggingface api
