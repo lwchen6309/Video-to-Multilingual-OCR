@@ -10,7 +10,6 @@ import cv2
 import pandas as pd
 from transformers import TrOCRProcessor, VisionEncoderDecoderModel
 import matplotlib.pyplot as plt
-from time import time
 
 
 #torch.hub.download_url_to_file('https://github.com/AaronCWacker/Yggdrasil/blob/main/images/BeautyIsTruthTruthisBeauty.JPG', 'BeautyIsTruthTruthisBeauty.JPG')
@@ -177,8 +176,10 @@ def inference(video, lang, full_scan, number_filter, use_trocr, time_step, perio
     # Draw boxes with box indices in the first frame of the output video
     im = Image.fromarray(output_frames[0])
     draw = ImageDraw.Draw(im)
+    font_size = 50
+    font_path = "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf"
     for i, box in enumerate(largest_boxes):
-        draw.text((box_position(box)), f"{i+1}", fill='red')
+        draw.text((box_position(box)), f"{i+1}", fill='red', font=ImageFont.truetype(font_path, font_size))
     
     output_video.release()
     vidcap.release()
@@ -240,7 +241,7 @@ gr.Interface(
         gr.outputs.Video(label='Output Video'),
         gr.outputs.Image(label='Output Preview', type='numpy'),
         gr.Plot(label='Temporal Profile'),
-        gr.outputs.Dataframe(headers=['Box', 'Time (s)', 'Text'], type='pandas')
+        gr.outputs.Dataframe(headers=['Box', 'Time (s)', 'Text'], type='pandas',  max_rows=15)
     ],
     title=title,
     description=description,
