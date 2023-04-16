@@ -10,6 +10,8 @@ import cv2
 import pandas as pd
 from transformers import TrOCRProcessor, VisionEncoderDecoderModel
 import matplotlib.pyplot as plt
+from time import time
+
 
 #torch.hub.download_url_to_file('https://github.com/AaronCWacker/Yggdrasil/blob/main/images/BeautyIsTruthTruthisBeauty.JPG', 'BeautyIsTruthTruthisBeauty.JPG')
 #torch.hub.download_url_to_file('https://github.com/AaronCWacker/Yggdrasil/blob/main/images/PleaseRepeatLouder.jpg', 'PleaseRepeatLouder.jpg')
@@ -87,7 +89,7 @@ def process_box(box, frame, enlarge_ratio):
     cropped_frame = frame[y1:y2, x1:x2]
     return cropped_frame
 
-def inference(video, lang, time_step, full_scan, number_filter, use_trocr, period_index):
+def inference(video, lang, full_scan, number_filter, use_trocr, time_step, period_index, box_enlarge_ratio=0.4):
     output = 'results.mp4'
     reader = easyocr.Reader(lang)
     bounds = []   
@@ -124,7 +126,7 @@ def inference(video, lang, time_step, full_scan, number_filter, use_trocr, perio
                         distance = np.linalg.norm(np.array(bbox_pos) - np.array(position))
                         if distance < 50:
                             if use_trocr:
-                                cropped_frame = process_box(box, frame, enlarge_ratio=0.2)
+                                cropped_frame = process_box(box, frame, enlarge_ratio=box_enlarge_ratio)
                                 pixel_values = processor(images=cropped_frame, return_tensors="pt").pixel_values
                                 generated_ids = model.generate(pixel_values.to(device))
                                 generated_text = processor.batch_decode(generated_ids, skip_special_tokens=True)[0]
@@ -132,7 +134,7 @@ def inference(video, lang, time_step, full_scan, number_filter, use_trocr, perio
                             else:
                                 temporal_profiles[i].append((count / frame_rate, box[1]))
                 else:
-                    cropped_frame = process_box(box, frame, enlarge_ratio=0.2)
+                    cropped_frame = process_box(box, frame, enlarge_ratio=box_enlarge_ratio)
                     if use_trocr:
                         pixel_values = processor(images=cropped_frame, return_tensors="pt").pixel_values
                         generated_ids = model.generate(pixel_values.to(device))
@@ -175,10 +177,8 @@ def inference(video, lang, time_step, full_scan, number_filter, use_trocr, perio
     # Draw boxes with box indices in the first frame of the output video
     im = Image.fromarray(output_frames[0])
     draw = ImageDraw.Draw(im)
-    font_size = 50
-    font_path = "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf"
     for i, box in enumerate(largest_boxes):
-        draw.text((box_position(box)), f"{i+1}", fill='red', font=ImageFont.truetype(font_path, font_size))
+        draw.text((box_position(box)), f"{i+1}", fill='red')
     
     output_video.release()
     vidcap.release()
@@ -208,7 +208,7 @@ description = 'Multilingual OCR which works conveniently on all devices in multi
 article = "<p style='text-align: center'></p>"
 
 examples = [
-['test.mp4',['en'],10,False,True,True,1]
+['test.mp4',['en'],False,True,True,10,1,0.4]
 ]
 
 css = ".output_image, .input_image {height: 40rem !important; width: 100% !important;}"
@@ -229,11 +229,12 @@ gr.Interface(
     [
         gr.inputs.Video(label='Input Video'),
         gr.inputs.CheckboxGroup(choices, type="value", default=['en'], label='Language'),
-        gr.inputs.Number(label='Time Step (in seconds)', default=1.0),
         gr.inputs.Checkbox(label='Full Screen Scan'),
         gr.inputs.Checkbox(label='Use TrOCR large'),
         gr.inputs.Checkbox(label='Number Filter (remove non-digit char and insert period)'),
-        gr.inputs.Textbox(label="period position",default=1)
+        gr.inputs.Number(label='Time Step (in seconds)', default=1.0),        
+        gr.inputs.Number(label="period position",default=1),
+        gr.inputs.Number(label='Box enlarge ratio', default=0.4)
     ],
     [
         gr.outputs.Video(label='Output Video'),
