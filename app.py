@@ -10,11 +10,7 @@ import cv2
 import pandas as pd
 from transformers import TrOCRProcessor, VisionEncoderDecoderModel
 import matplotlib.pyplot as plt
-
-
-#torch.hub.download_url_to_file('https://github.com/AaronCWacker/Yggdrasil/blob/main/images/BeautyIsTruthTruthisBeauty.JPG', 'BeautyIsTruthTruthisBeauty.JPG')
-#torch.hub.download_url_to_file('https://github.com/AaronCWacker/Yggdrasil/blob/main/images/PleaseRepeatLouder.jpg', 'PleaseRepeatLouder.jpg')
-#torch.hub.download_url_to_file('https://github.com/AaronCWacker/Yggdrasil/blob/main/images/ProhibitedInWhiteHouse.JPG', 'ProhibitedInWhiteHouse.JPG')
+import io
 
 torch.hub.download_url_to_file('https://raw.githubusercontent.com/AaronCWacker/Yggdrasil/master/images/20-Books.jpg','20-Books.jpg')
 torch.hub.download_url_to_file('https://github.com/JaidedAI/EasyOCR/raw/master/examples/english.png', 'COVID.png')
@@ -199,9 +195,18 @@ def inference(video, lang, full_scan, number_filter, use_trocr, time_step, perio
         df_list.append({"Box": f"", "Time (s)": "", "Text": ""})
     df = pd.concat([pd.DataFrame(df_list)])
 
-    # generate the plot of temporal profile
+    # Convert the Matplotlib plot to a NumPy array
     plot_fig = plot_temporal_profile(temporal_profiles)
-    return output, im, plot_fig, df
+    buf = io.BytesIO()
+    plot_fig.savefig(buf, format='png')
+    buf.seek(0)
+    # Convert the resized image to a NumPy array
+    plot_np = np.array(PIL.Image.open(buf))
+
+    # Close the buffer
+    buf.close()
+
+    return output, im, plot_np, df  # Change this line
 
 
 title = '🖼️Video to Multilingual OCR👁️Gradio'
@@ -239,9 +244,10 @@ gr.Interface(
     ],
     [
         gr.outputs.Video(label='Output Video'),
-        gr.outputs.Image(label='Output Preview', type='numpy'),
-        gr.Plot(label='Temporal Profile'),
-        gr.outputs.Dataframe(headers=['Box', 'Time (s)', 'Text'], type='pandas',  max_rows=15)
+        gr.outputs.Image(label='Output Preview', type='numpy').style(height=480),
+        # gr.Plot(label='Temporal Profile'),
+        gr.outputs.Image(label='Temporal Profile', type='numpy').style(height=640),
+        gr.outputs.Dataframe(headers=['Box', 'Time (s)', 'Text'], type='pandas')
     ],
     title=title,
     description=description,
